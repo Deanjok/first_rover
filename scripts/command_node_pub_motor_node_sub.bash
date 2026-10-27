@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# To actually make this executable you first need to type in the terminal: sudo chmod +x <file name.sh>
+# Launch publisher and subscriber nodes with cleanup handling
+# the cleanup makes sure that the publisher and subscriber nodes are shutdown and cleaned up properly
+cleanup() {
+    echo "Restarting ROS 2 daemon to cleanup before shutting down all processes"
+    echo "Terminating all ROS 2-related processes..."
+    kill 0
+    exit
+    }
+
+    trap "cleanup" SIGINT
+
+    # Launch the publisher node
+    ros2 run first_rover motor_node &
+
+    sleep 2
+
+    #Launch the subscriber node
+
+    ros2 run first_rover command_node
