@@ -1,10 +1,10 @@
 
 '''
 Controls 4 motors for a PCA9685 motor board.
-Reads speeds from -100 to 100, one per line, and drives the motor
+Reads speeds from -100 to 100, and drives the motor
 Receives data thourgh WiFi (UDP)
 Positive = forward, negative = backward, 0 = brake.
-Stops the motor safely on Ctrl+C or when input ends.
+Stops the motor safely on Ctrl+C.
 '''
 # Imports
 
@@ -46,7 +46,7 @@ last_message = ticks_ms() # Assigns ticks_ms() to last_message
 # We are using this to track the time between eah signal/ command that is sent to the rover
 history = [] # Our list for storing distance from an object
 miss_counter = 0 # Allows us to track how many miss reading of 0.0 we have in a row.
-# If 5 then we terminate the program and the rover stops 
+# If 5 then the rover stops and starts listening again
 avg = 0 # Average distance, calculated from the history list that only holds 3 values at the same time
 
 
@@ -60,7 +60,7 @@ echo_pin = Pin(15,Pin.IN)
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 wlan.connect(SSID,PASSWORD)
-# Tracking the amount of attempts that it takes us to connect the two boards
+# Tracking the amount of attempts that it takes us to connect Pico to the WiFi
 attempts = 0
 '''
 A while True loop that tries to connec the two boards via WIFI.
@@ -134,7 +134,7 @@ def move(speed):
     """Drive the motor. speed: -100 to 100 (sign = direction)."""
 
     # Pick the direction pair. 1 = on, 0 = off.
-    # The motor driver reads channels 1, 2, 4 and 5 TOGETHER:
+    # The motor driver reads channels 1, 2, 4, 5, 7, 8, 10 and 11 TOGETHER:
     #   pin_a  pin_b pin_c pin_d pin_e pin_f pin_g pin_h     result
     #     0      1     1     0     1     0     1     0       forward
     #     1      0     0     1     0     1     0     1       backward
@@ -238,46 +238,45 @@ def get_distance():
     
 
 def add_reading(history, distance):
-'''
-This is where the history list is adding a distance, checking if the list is above 3
-elements and if it is is pops(0) which means it deleted the first entry of the list,
-because it is the oldest one. If you think of a list [1.2, 3.2, 5.4] with this function
-let's add another number which is 4.8. The function adds it to the list [1.2, 3.2, 5.4, 4.8].
-It checks if the list is above WINDOW = 3. if it is it deletes the first entry 1.2 with
-history.pop(0). The list then becomes [3.2, 5.4, 4.8]. We then return the list outside of the function
-If another number comes in we now delete 3.2 since it is the Oldest entry and we are following
-FIFO. First In First Out.
-'''
+    '''
+    This is where the history list is adding a distance, checking if the list is above 3
+    elements and if it is is pops(0) which means it deleted the first entry of the list,
+    because it is the oldest one. If you think of a list [1.2, 3.2, 5.4] with this function
+    let's add another number which is 4.8. The function adds it to the list [1.2, 3.2, 5.4, 4.8].
+    It checks if the list is above WINDOW = 3. if it is it deletes the first entry 1.2 with
+    history.pop(0). The list then becomes [3.2, 5.4, 4.8]. We then return the list outside of the function
+    If another number comes in we now delete 3.2 since it is the Oldest entry and we are following
+    FIFO. First In First Out.
+    '''
     history.append(distance)
     if len(history) > WINDOW:
         history.pop(0)
     return history
 
 def average(history):
-'''
-Calculates the average distane in the 3 element history list.
-If we have just started the program or there are no elements in the list
-which makes the length of the list = 0. We will return None. Why None? I don't know
-If the length does not equal = 0 we will take the sum of the list and / it by the length to
-get our average number of the list. The while loop will not add 0.0 to the list as that
-will drag down the avg by a lot. This means the rover might constantly jitter because of a
-miss readings, that are not true.
-'''
+    '''
+    Calculates the average distane in the 3 element history list.
+    If we have just started the program or there are no elements in the list
+    which makes the length of the list = 0. We will return None. Returns None because an empty list has no average. Returning 0 would mean
+    touching somethings so its wrong. It will also drag the avg down.
+    If the length does not equal = 0 we will take the sum of the list and / it by the length to
+    get our average number of the list. The while loop will not add 0.0 to the list as that
+    will drag down the avg by a lot. This means the rover might constantly jitter because of a
+    miss readings, that are not true.
+    '''
     if len(history) == 0:
-        # Returns None because an empty line has no average. Returning 0 would mean
-        # touching somethings so its wrong. It will also drag the avg down.
         return None
     return sum(history) / len(history)
 
 while True:
-'''
-The overall structure in this loop is we try to see if the loop receives an input, if it does
-it reads it, turns it into an int. If the avg distance is above 40 the rover drives forwards if not it stops.
-Reverses to 50cm away and then stops, and starts driving forward again. If an input is not
-received after 2 seconds it stops the rover to prevent it from crashing into a wall if input does not
-arrive because the program was shutdown or a bug occured. And if a exception occurs we try to stop
-the program from crashing
-'''
+    '''
+    The overall structure in this loop is we try to see if the loop receives an input, if it does
+    it reads it, turns it into an int. If the avg distance is above 40 the rover drives forwards if not it stops.
+    Reverses to 50cm away and then stops, and starts driving forward again. If an input is not
+    received after 2 seconds it stops the rover to prevent it from crashing into a wall if input does not
+    arrive because the program was shutdown or a bug occured. And if a exception occurs we try to stop
+    the program from crashing
+    '''
     # try to run the while loop
     try:
         # Getting the distance from the sensor.
@@ -341,40 +340,53 @@ the program from crashing
                 '''
                 if avg <= STOP_DISTANCE:
                     print(f"Current Speed 1: {current_speed}")
+                    current_speed = 0
                     move(0)
-
-                    # ramp down, stop and start reversing, then we need to check if the avg is above 40 and stop
+                    miss_counter = 0
+                    # ramp down, stop and start reversing, then we need to check if the avg is above 50 and stop
                     while 0.0 < avg < 50.0:
                         sleep(0.06)
                         distance = get_distance()
-                        add_reading(history, distance)
-                        avg = average(history)
-                        print(f"avg: {avg}")
-                        print(f"History: {history}")
-                        print(f"Distance: {distance}")
-                        
+                        if distance > 0.0:
+                            add_reading(history, distance)
+                            avg = average(history)
+                            print(f"avg: {avg}")
+                            print(f"History: {history}")
+                            print(f"Distance: {distance}")
+                            
 
-                        for magnitude in range(current_speed, -101, -RAMP_STEP):
-                            move(magnitude)
-                            sleep(RAMP_DELAY)
-                        current_speed = -100
-                        
+                            for magnitude in range(current_speed, -101, -RAMP_STEP):
+                                move(magnitude)
+                                sleep(RAMP_DELAY)
+                            current_speed = -100
+                            miss_counter = 0
+                        else:
+                            miss_counter += 1
+                            if miss_counter >= MAX_MISSES:
+                                current_speed = 0
+                                new_speed = 0
+                                move(0)
+                                break
+
                     for magnitude in range(current_speed,1,RAMP_STEP):
                         move(magnitude)
                         sleep(RAMP_DELAY)
                     current_speed = 0
                     new_speed = 0
-                '''
-                else if the avg distance is above STOP_DISTANCE
-                it looks if new_speed is above current if so ramp up to that new speed
-                by RAMP_STEP. If new_speed is lower than current ramp down to that speed
-                by RAMP_STEP
-                if it is the same then keep moving at current speed.
-                As we exit the statements we move at a new speed since we always want to be at that speed here
-                and then it assigns new speed to current speed. Resets the miss_counter because the reading
-                was positive
-                '''
+            
                 else:
+                    
+                        '''
+                        else if the avg distance is above STOP_DISTANCE
+                        it looks if new_speed is above current if so ramp up to that new speed
+                        by RAMP_STEP. If new_speed is lower than current ramp down to that speed
+                        by RAMP_STEP
+                        if it is the same then keep moving at current speed.
+                        As we exit the statements we move at a new speed since we always want to be at that speed here
+                        and then it assigns new speed to current speed. Resets the miss_counter because the reading
+                        was positive
+                        '''
+                
                         # if the input is higher than the current value it will ramp up slowly
                         # from current_speed (50) to value(100) with a step of RAMP_STEP and a
                         # delay of RAMP_DELAY. Function move() has magnitude inside it because
@@ -400,7 +412,7 @@ the program from crashing
                     current_speed = new_speed
                 miss_counter = 0
                 '''
-                If distance is below 0.0 we add a miss_counter because we got an error/ missread.
+                If distance is 0.0 we add a miss_counter because we got an error/ missread.
                 check if avg distance is above STOP_DISTANCE if it is it then checks if miss_counter is
                 above MAX_MISSES and if it is it stops the rover to prevent a crash. If it isn't set new_speed
                 to current speed.
@@ -412,15 +424,13 @@ the program from crashing
                     if miss_counter >= MAX_MISSES:
                         current_speed = 0
                         new_speed = 0
-                        sys.exit()
+                        move(0)
                     else:
                         current_speed = new_speed
                 else:
                     current_speed = 0
                     new_speed = 0
-                    
-        #LOG; This lines give syntax error
-        # Fix: it looked like this         else: elapsed > TIMEOUT_MS:
+                    move(0)
         '''
         If a message has not been received within TIMEOUT_MS. Set speed to 0 to not crash into anything
         '''
